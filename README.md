@@ -1,5 +1,11 @@
 # Tideline
 
+[![Live demo](https://img.shields.io/badge/Live%20demo-profrino.github.io%2Ftideline-1f5b96?logo=github&logoColor=white)](https://profrino.github.io/tideline/)
+[![License: MIT](https://img.shields.io/github/license/ProfRino/tideline?label=License&color=yellow)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/ProfRino/tideline?label=latest&color=blue)](https://github.com/ProfRino/tideline/releases/latest)
+
+**[▶ Try it in your browser](https://profrino.github.io/tideline/)** — nothing to install.
+
 A procedural ocean & sky playground in a single HTML file. Everything is generated in shaders and code — no textures, no models, no network requests. Open `Tideline-Standalone.html` in any modern browser and you're sailing.
 
 ![Azure — open ocean with volumetric clouds](assets/azure.gif)
