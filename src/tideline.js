@@ -268,13 +268,15 @@ const skyFragment = /* glsl */ `
     float y01 = clamp((pos.y - CLOUD_BASE) / (CLOUD_TOP - CLOUD_BASE), 0.0, 1.0);
     vec2 cuv = pos.xz * 0.00042 * uCloudScale + windDrift * 0.001;
     float mass = smoothstep(covLo, covLo + 0.42, cloudFbm(cuv));
-    if (mass < 0.015) return 0.0; // empty air: skip the expensive erosion
+    if (mass < 0.015) return 0.0; // empty air: skip the expensive 3D work
+    // true 3D base modulation: without this the 2D coverage smears into
+    // striation lines along the view ray
+    float m3 = vnoise3(vec3(pos.x + windDrift.x * 2.4, pos.y * 1.45, pos.z + windDrift.y * 2.4) * 0.0011);
+    mass *= 0.58 + 0.62 * m3;
     float prof = smoothstep(0.0, 0.08, y01) * smoothstep(1.0, 0.22 + mass * 0.62, y01);
     float shape = mass * prof;
     if (shape < 0.01) return 0.0;
-    // 3D erosion billows the edges; it relaxes with distance so far
-    // decks read as coherent masses instead of noise
-    float eroAmp = 0.62 * (1.0 + (1.0 - covLo) * 0.55) * (1.0 - clamp(rayDist / 11000.0, 0.0, 0.65));
+    float eroAmp = 0.62 * (1.0 + (1.0 - covLo) * 0.55);
     float ero = fbm3(vec3(pos.x + windDrift.x * 2.4, pos.y * 1.6, pos.z + windDrift.y * 2.4) * 0.0023);
     float d = clamp((shape - (ero - 0.38) * eroAmp * (1.15 - shape)) * 1.7 - 0.22, 0.0, 1.0);
     return d * smoothstep(0.04, 0.3, mass);
