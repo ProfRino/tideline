@@ -749,7 +749,8 @@ const waterFragment = /* glsl */ `
        Refract the eye ray through the rippled surface into the air
        and evaluate a live sky (gradient + clouds + sun glare); rays
        past the critical angle mirror the murky水 interior instead. */
-    vec3 nUnder = normalize(normal + vec3(detailHF.x, 0.0, detailHF.y) * 0.6);
+    float underDetail = uDetailAmp * 0.42 / (1.0 + dist * 0.012);
+    vec3 nUnder = normalize(normal + vec3(detailHF.x, 0.0, detailHF.y) * underDetail);
     vec3 airDir = refract(-viewDir, -nUnder, 1.33);
     float tir = step(dot(airDir, airDir), 1e-6); // 1 = total internal reflection
     airDir = normalize(airDir + vec3(0.0, 1e-4, 0.0));
@@ -764,6 +765,10 @@ const waterFragment = /* glsl */ `
     skyCol = mix(skyCol, vec3(0.95, 0.97, 1.0) * (0.35 + 0.85 * uDay), cloudMask * 0.85);
     float sunGlare = pow(max(dot(airDir, uLightDir), 0.0), 60.0);
     skyCol += uLightColor * sunGlare * 8.0;
+    // submerged: the refraction target holds the real world above the
+    // surface — ship, island, sky — so the window shows actual scenery
+    vec2 wUv = clamp(gl_FragCoord.xy / uScreenSize + nUnder.xz * 0.24, vec2(0.004), vec2(0.996));
+    skyCol = mix(skyCol, texture2D(uRefraction, wUv).rgb * 1.08, uSubmerged);
 
     /* total internal reflection: a green-glass mirror of the lit sea
        floor, streaked by the same caustic light webs */
@@ -1596,6 +1601,28 @@ function init() {
     waterFar.visible = true;
   }
 
+  /* ---- skyward pass: while submerged, capture the world ABOVE the
+     surface into the refraction target so Snell's window shows it ---- */
+  function renderSkyward() {
+    waterNear.visible = false;
+    waterFar.visible = false;
+    const oldToneMapping = renderer.toneMapping;
+    const oldShadowAuto = renderer.shadowMap.autoUpdate;
+    const oldUnderwater = skyUniforms.uUnderwater.value;
+    skyUniforms.uUnderwater.value = 0; // the sky above the surface is an air sky
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.setRenderTarget(refractionRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    renderer.toneMapping = oldToneMapping;
+    renderer.shadowMap.autoUpdate = oldShadowAuto;
+    skyUniforms.uUnderwater.value = oldUnderwater;
+    waterNear.visible = true;
+    waterFar.visible = true;
+  }
+
   /* ---- refraction pass: the underwater world through the main camera ---- */
   const savedClearColor = new THREE.Color();
   function renderRefraction() {
@@ -1806,6 +1833,8 @@ function init() {
     if (!submerged) {
       renderMirror();
       renderRefraction();
+    } else {
+      renderSkyward();
     }
     renderer.render(scene, camera);
 
@@ -1873,7 +1902,7 @@ function init() {
       // (a visible tab clears the drawing buffer after each composite)
       const elapsed = (performance.now() - startedAt) / 1000;
       const sub = camera.position.y < sampleWave(camera.position.x, camera.position.z, elapsed) - 0.04;
-      if (!sub) { renderMirror(); renderRefraction(); }
+      if (!sub) { renderMirror(); renderRefraction(); } else { renderSkyward(); }
       renderer.render(scene, camera);
       return renderer.domElement.toDataURL("image/jpeg", quality);
     },
