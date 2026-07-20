@@ -16,23 +16,9 @@ Everything is generated **in shaders and code** — no textures, no 3D models,
 no network requests — and the whole demo builds to a **single HTML file** that
 runs entirely in your web browser.
 
-![Demo — the same anchorage cycling from midday to sunset to rain to a lightning storm](assets/demo.gif)
+<img src="assets/demo.gif" alt="Demo — the same anchorage cycling through all six sea states, from calm morning to lightning tempest" width="100%">
 
 ---
-
-## Project team
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/ProfRino">
-        <img src="https://github.com/ProfRino.png?size=100" width="100" alt="Prof Rino"><br>
-        <strong>Prof Rino</strong>
-      </a><br>
-      Project lead
-    </td>
-  </tr>
-</table>
 
 ## Features
 
