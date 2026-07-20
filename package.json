@@ -1,0 +1,18 @@
+{
+  "name": "tideline",
+  "version": "1.0.0",
+  "description": "Procedural Three.js ocean and sky playground — Gerstner waves with real reflections and refraction, volumetric clouds, an explorable underwater world, rain and lightning. Builds to a single self-contained HTML file.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Rino Lovreglio",
+  "scripts": {
+    "build": "esbuild src/tideline.js --bundle --minify --format=iife --platform=browser --target=es2020 --outfile=tideline.bundle.js && node build-standalone.mjs",
+    "dev": "esbuild src/tideline.js --bundle --format=iife --platform=browser --target=es2020 --outfile=tideline.bundle.js --watch"
+  },
+  "dependencies": {
+    "three": "^0.185.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
