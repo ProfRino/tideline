@@ -269,12 +269,12 @@ const skyFragment = /* glsl */ `
     vec2 cuv = pos.xz * 0.00042 * uCloudScale + windDrift * 0.001;
     float mass = smoothstep(covLo, covLo + 0.42, cloudFbm(cuv));
     if (mass < 0.015) return 0.0; // empty air: skip the expensive erosion
-    float prof = smoothstep(0.0, 0.08, y01) * smoothstep(1.0, 0.35 + mass * 0.45, y01);
+    float prof = smoothstep(0.0, 0.08, y01) * smoothstep(1.0, 0.22 + mass * 0.62, y01);
     float shape = mass * prof;
     if (shape < 0.01) return 0.0;
     // 3D erosion billows the edges; it relaxes with distance so far
     // decks read as coherent masses instead of noise
-    float eroAmp = 0.62 * (1.0 - clamp(rayDist / 11000.0, 0.0, 0.65));
+    float eroAmp = 0.62 * (1.0 + (1.0 - covLo) * 0.55) * (1.0 - clamp(rayDist / 11000.0, 0.0, 0.65));
     float ero = fbm3(vec3(pos.x + windDrift.x * 2.4, pos.y * 1.6, pos.z + windDrift.y * 2.4) * 0.0023);
     float d = clamp((shape - (ero - 0.38) * eroAmp * (1.15 - shape)) * 1.7 - 0.22, 0.0, 1.0);
     return d * smoothstep(0.04, 0.3, mass);
@@ -358,6 +358,7 @@ const skyFragment = /* glsl */ `
     float horizonFade = smoothstep(0.0, 0.045, direction.y);
     float cloudFade = smoothstep(0.05, 0.17, direction.y); // haze owns the horizon band
     float cover = clamp(uCloudCover, 0.0, 1.0);
+    float cloudShadow = 0.0;
     #if defined(MIRROR_PASS) || defined(CLOUD_FLAT)
     /* mirror pass / low-power tier: a flat deck is enough */
     if (direction.y > 0.02 && cover > 0.02) {
@@ -366,6 +367,7 @@ const skyFragment = /* glsl */ `
       float flatCloud = smoothstep(1.0 - cover * 0.95, 1.32 - cover * 0.95, cloudFbm(mcuv));
       sky = mix(sky, (uCloudAmbient * (0.55 + 0.5 * uDay) + uSunTint * 0.2) * (1.0 - uRainSky * 0.5),
         flatCloud * horizonFade * 0.9);
+      cloudShadow = flatCloud * 0.8;
       sky += uLightning * vec3(0.72, 0.78, 1.0) * (0.22 + flatCloud * 0.9);
     }
     #else
@@ -377,8 +379,8 @@ const skyFragment = /* glsl */ `
       t1 = min(t1, t0 + 6500.0);
       float dt = (t1 - t0) / float(CLOUD_STEPS);
       // interleaved gradient noise: clean ordered dither, static so it never crawls
-      float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-      float t = t0 + dt * jitter * 0.55;
+      float jitter = hash12(gl_FragCoord.xy * 1.37); // white noise: no ordered moire
+      float t = t0 + dt * jitter * 0.8;
 
       float transmittance = 1.0;
       vec3 scattered = vec3(0.0);
@@ -392,12 +394,12 @@ const skyFragment = /* glsl */ `
       float g1 = 0.62, g2 = -0.18;
       float ph1 = (1.0 - g1 * g1) / pow(1.0 + g1 * g1 - 2.0 * g1 * cosPh, 1.5);
       float ph2 = (1.0 - g2 * g2) / pow(1.0 + g2 * g2 - 2.0 * g2 * cosPh, 1.5);
-      float phase = mix(ph2, ph1, 0.62) * 0.25;
+      float phase = mix(ph2, ph1, 0.62) * 0.3;
 
       vec3 sunCol = (uSunTint * (2.6 * uDay + 0.04)
         + vec3(0.55, 0.65, 0.85) * (1.0 - uDay) * 0.25) // moonlight at night
         * (1.0 - uRainSky * 0.55);
-      vec3 ambient = uCloudAmbient * (0.7 + 0.6 * uDay) * (1.0 - uRainSky * 0.5);
+      vec3 ambient = uCloudAmbient * (0.7 + 0.6 * uDay) * (1.0 - uRainSky * 0.5) * (0.26 + 0.74 * clamp(skyLightDir.y * 2.2, 0.0, 1.0));
 
       float covLo = 1.0 - cover * 0.88;
       // shadow probes stretch when the light sits low so decks stay coherent
@@ -407,11 +409,12 @@ const skyFragment = /* glsl */ `
         vec3 pos = direction * t;
         float density = cloudField(pos, windDrift, covLo, t);
         if (density > 0.004) {
-          float shadowAcc = 0.0;
+          // short probe = the cloud shades its own far side; long probe = neighbours
+          float shadowAcc = cloudField(pos + skyLightDir * 55.0, windDrift, covLo, t) * 1.5;
           for (int j = 1; j <= CLOUD_LSTEPS; j++) {
             shadowAcc += cloudMass(pos + skyLightDir * lt * float(j), windDrift, covLo);
           }
-          float sunLight = exp(-shadowAcc * 1.45);
+          float sunLight = exp(-shadowAcc * 2.3);
           // powder term keeps rims bright, cores shaded
           float powder = 1.0 - exp(-density * 3.5);
           float y01 = clamp((pos.y - CLOUD_BASE) / (CLOUD_TOP - CLOUD_BASE), 0.0, 1.0);
@@ -425,6 +428,7 @@ const skyFragment = /* glsl */ `
       }
 
       float cloudAmount = (1.0 - transmittance) * cloudFade;
+      cloudShadow = cloudAmount;
       // fade the thinnest fringes — at low opacity the march dither shows
       float fringe = smoothstep(0.02, 0.14, cloudAmount);
       cloudAmount *= fringe;
@@ -446,9 +450,29 @@ const skyFragment = /* glsl */ `
       sky = mix(sky, uSunTint * 0.9 + uCloudAmbient * 0.5, cirMask * 0.4 * horizonFade * uDay);
     }
 
+    /* ---- crepuscular rays fan out when the sun sits low ---- */
+    float lowSun = clamp(1.0 - uSunDir.y * 3.0, 0.0, 1.0) * uDay;
+    if (lowSun > 0.05 && cosTheta > 0.15) {
+      vec3 basisA = normalize(cross(uSunDir, up));
+      vec3 basisB = normalize(cross(uSunDir, basisA));
+      vec3 rel = normalize(direction - uSunDir * cosTheta);
+      float phi = atan(dot(rel, basisB), dot(rel, basisA));
+      float spokes = vnoise(vec2(phi * 3.5 + 7.0, 0.5)) * 0.6 + vnoise(vec2(phi * 9.0, 2.5)) * 0.4;
+      spokes = smoothstep(0.45, 0.85, spokes);
+      sky += uSunTint * spokes * pow(max(cosTheta, 0.0), 5.0) * lowSun
+        * (1.0 - cloudShadow) * (1.0 - uCloudCover * 0.45) * 0.5;
+    }
+
+    /* ---- distant rain curtains smear the horizon in a downpour ---- */
+    float rainVeil = uRainSky * smoothstep(0.35, 0.02, direction.y)
+      * (0.35 + 0.5 * vnoise(vec2(atan(direction.z, direction.x) * 6.0, direction.y * 1.2 - uTime * 0.1)));
+    sky = mix(sky, uFogColor * 1.06, clamp(rainVeil, 0.0, 1.0) * 0.55);
+
     /* ---- horizon haze — matches the water fog color for a seamless line ---- */
     float haze = smoothstep(uHazeBand, 0.0, max(direction.y, 0.0));
-    sky = mix(sky, uFogColor, haze * uHazeMix);
+    haze *= 1.0 - pow(max(cosTheta, 0.0), 6.0) * 0.85 * uDay; // sun glow burns through
+    vec3 hazeCol = uFogColor * mix(0.55, 1.35, pow(max(cosTheta, 0.0), 3.0) * uDay);
+    sky = mix(sky, hazeCol, haze * uHazeMix);
 
     /* ---- residual sun glow that penetrates haze and thin cloud ---- */
     sky += uSunTint * pow(max(cosTheta, 0.0), 160.0) * 0.35 * uDay * (1.0 - uCloudCover * 0.7) * (1.0 - uRainSky * 0.85);
@@ -524,6 +548,7 @@ const waterFragment = /* glsl */ `
   uniform float uCloudCover2;
   uniform float uSubmerged;
   uniform float uRain;
+  uniform float uDay;
 
   varying vec3 vWorldPosition;
   varying vec2 vUndisplaced;
@@ -725,23 +750,31 @@ const waterFragment = /* glsl */ `
     float tir = step(dot(airDir, airDir), 1e-6); // 1 = total internal reflection
     airDir = normalize(airDir + vec3(0.0, 1e-4, 0.0));
 
-    // cheap procedural sky seen through the window
+    /* Snell's window: the sky seen through the surface stays close to
+       its TRUE brightness and hue — blue, with white clouds legible */
     float skyLift = clamp(airDir.y, 0.0, 1.0);
-    vec3 skyCol = mix(uFogColor * 1.15, uSkyZenith * 1.9, pow(skyLift, 0.55));
+    vec3 skyCol = mix(uFogColor * 1.9, uSkyZenith * 3.4, pow(skyLift, 0.6));
     vec2 cuv = airDir.xz / (airDir.y + 0.25);
     float cl = fbm(cuv * 0.7 + vec2(uTime * 0.012, uTime * 0.004));
     float cloudMask = smoothstep(mix(0.74, 0.32, uCloudCover2), mix(0.95, 0.62, uCloudCover2), cl);
-    skyCol = mix(skyCol, uSkyZenith * 0.85 + uLightColor * 0.35, cloudMask * 0.75);
-    float sunGlare = pow(max(dot(airDir, uLightDir), 0.0), 90.0);
-    skyCol += uLightColor * sunGlare * 6.0;
-    skyCol *= 0.75 + 0.5 * clamp(normal.y, 0.0, 1.0); // ripple shading
+    skyCol = mix(skyCol, vec3(0.95, 0.97, 1.0) * (0.35 + 0.85 * uDay), cloudMask * 0.85);
+    float sunGlare = pow(max(dot(airDir, uLightDir), 0.0), 60.0);
+    skyCol += uLightColor * sunGlare * 8.0;
 
-    vec3 interior = uUnderFog * (0.75 + 0.35 * ridge(vnoise(q * 1.3 + vec2(uTime * 0.2, 0.0))));
-    // soften the window edge with the surface detail so it shimmers
-    float edgeSoft = smoothstep(0.0, 0.25, dot(airDir, vec3(0.0, 1.0, 0.0)));
-    color = mix(skyCol, interior, clamp(tir + (1.0 - edgeSoft) * 0.55, 0.0, 1.0));
-    // faint caustic dapple on the underside itself
-    color += uLightColor * caustic(q) * 0.1 * max(uLightDir.y, 0.0);
+    /* total internal reflection: a green-glass mirror of the lit sea
+       floor, streaked by the same caustic light webs */
+    float bounce = min(caustic(q * 0.35 + vec2(3.7, 1.3)), 1.6);
+    vec3 tirCol = uUnderFog * (1.05 + 1.5 * bounce)
+      + vec3(0.07, 0.24, 0.19) * bounce * max(uLightDir.y, 0.0) * 2.4;
+    // silvery outlines trace the steep ripple flanks (grazing reflections)
+    float crest = smoothstep(0.14, 0.42, length(normal.xz));
+    tirCol += vec3(0.5, 0.68, 0.66) * crest * (0.25 + 0.55 * uDay);
+
+    float edge = smoothstep(0.0, 0.3, airDir.y) * (1.0 - tir);
+    color = mix(tirCol, skyCol, edge);
+    // silvery rim where rays graze the critical angle
+    float rim = pow(1.0 - abs(edge * 2.0 - 1.0), 3.0);
+    color += vec3(0.7, 0.82, 0.82) * rim * 0.4 * (0.25 + 0.75 * uDay);
     float fogU = 1.0 - exp(-pow(dist * 0.03, 2.0));
     color = mix(color, uUnderFog, clamp(fogU, 0.0, 1.0));
     }
@@ -939,7 +972,8 @@ function computeAtmosphere(sunDir, clouds) {
   const overcast = THREE.MathUtils.clamp(clouds * 0.85, 0, 1);
 
   const sunTint = scratch.a.copy(COL.white).lerp(COL.ember, warm).lerp(COL.grey, overcast * 0.75);
-  const fog = scratch.b.copy(COL.dayFog).lerp(COL.duskFog, warm * 0.8).lerp(COL.stormFog, overcast * 0.8);
+  const fogOvercast = THREE.MathUtils.smoothstep(clouds, 0.5, 0.95);
+  const fog = scratch.b.copy(COL.dayFog).lerp(COL.duskFog, warm * 0.85).lerp(COL.stormFog, fogOvercast * 0.85);
   fog.lerp(COL.nightFog, 1 - day);
   return { day, warm, overcast, sunTint, fog };
 }
@@ -1145,6 +1179,7 @@ function init() {
     uCloudCover2: { value: state.clouds },
     uSubmerged: { value: 0 },
     uRain: { value: 0 },
+    uDay: { value: 1 },
   };
   const waterDefines = { NW };
   const nearSegments = mobile ? 256 : 448;
@@ -1637,7 +1672,7 @@ function init() {
     if (!debugFlags.freezeSky) {
       skyUniforms.uTurbidity.value = Math.min(2.2 + atmo.overcast * 7.6 + atmo.warm * 1.2, 12);
       skyUniforms.uRayleigh.value = THREE.MathUtils.lerp(3.2, 2.4, atmo.warm);
-      skyUniforms.uMieCoefficient.value = 0.003 + atmo.overcast * 0.016 + atmo.warm * 0.013;
+      skyUniforms.uMieCoefficient.value = 0.003 + atmo.overcast * 0.016 + atmo.warm * 0.021;
       skyUniforms.uSkySat.value = 1.38 - atmo.warm * 0.33 - atmo.overcast * 0.25;
     }
     skyUniforms.uSunTint.value.copy(atmo.sunTint).multiplyScalar(0.55 * atmo.day + 0.01);
@@ -1724,6 +1759,7 @@ function init() {
     const dtSec = Math.min(Math.max(elapsed - lastElapsed, 0.001), 0.1);
     lastElapsed = elapsed;
     waterUniforms.uRain.value = smooth.rain;
+    waterUniforms.uDay.value = atmo.day;
     skyUniforms.uRainSky.value = smooth.rain;
     rain.visible = smooth.rain > 0.03 && subMix < 0.5;
     rainUniforms.uRainAmt.value = smooth.rain;
