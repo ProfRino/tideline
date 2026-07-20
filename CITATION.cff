@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Tideline"
+type: software
+authors:
+  - family-names: "Lovreglio"
+    given-names: "Ruggiero"
+    affiliation: "Massey University"
+repository-code: "https://github.com/ProfRino/tideline"
+url: "https://profrino.github.io/tideline/"
+license: MIT
+abstract: "A procedural Three.js ocean and sky playground in a single HTML file: Gerstner waves with real reflections and refraction, raymarched volumetric clouds, an explorable underwater world, rain and lightning."

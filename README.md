@@ -1,61 +1,129 @@
 # Tideline
 
-[![Live demo](https://img.shields.io/badge/Live%20demo-profrino.github.io%2Ftideline-1f5b96?logo=github&logoColor=white)](https://profrino.github.io/tideline/)
-[![License: MIT](https://img.shields.io/github/license/ProfRino/tideline?label=License&color=yellow)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/ProfRino/tideline?label=latest&color=blue)](https://github.com/ProfRino/tideline/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/ProfRino/tideline?label=License&color=yellow)](LICENSE)
+[![Live demo](https://img.shields.io/badge/Live%20demo-profrino.github.io%2Ftideline-1f5b96?logo=github&logoColor=white)](https://profrino.github.io/tideline/)
 
-**[▶ Try it in your browser](https://profrino.github.io/tideline/)** — nothing to install.
+Tideline is a **procedural ocean and sky playground** for the browser. A
+Gerstner-wave sea with real reflections and refraction, raymarched volumetric
+clouds over a physically based scattering sky, an explorable underwater world,
+rain that dimples the surface, and forked lightning — with six sea states
+(**Calm, Azure, Golden, Rain, Storm, Tempest**) and live sliders for wind,
+wave height, whitecaps, solar time, cloud cover and rain. Drag to orbit, and
+dive below the surface to keep exploring.
 
-A procedural ocean & sky playground in a single HTML file. Everything is generated in shaders and code — no textures, no models, no network requests. Open `Tideline-Standalone.html` in any modern browser and you're sailing.
+Everything is generated **in shaders and code** — no textures, no 3D models,
+no network requests — and the whole demo builds to a **single HTML file** that
+runs entirely in your web browser.
 
-![Azure — open ocean with volumetric clouds](assets/azure.gif)
+![Demo — the same anchorage cycling from midday to sunset to rain to a lightning storm](assets/demo.gif)
 
-## Scenarios
+---
 
-| | |
-|---|---|
-| ![Golden hour](assets/golden.gif) | ![Underwater](assets/underwater.gif) |
-| ![Rain](assets/rain.gif) | ![Tempest with lightning](assets/tempest.gif) |
+## Project team
 
-Six sea states — **Calm, Azure, Golden, Rain, Storm, Tempest** — plus live sliders for wind, wave height, whitecaps, solar time, cloud cover and rain. Drag to orbit, scroll to zoom, and **dive below the surface** to explore the seabed.
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/ProfRino">
+        <img src="https://github.com/ProfRino.png?size=100" width="100" alt="Prof Rino"><br>
+        <strong>Prof Rino</strong>
+      </a><br>
+      Project lead
+    </td>
+  </tr>
+</table>
 
 ## Features
 
-**Water**
-- Gerstner wave field (14 components, deep-water dispersion) with travelling group envelopes, so swells arrive in sets that build and dissolve
-- Real planar reflections (mirrored scene render) and real screen-space refraction — the seabed, kelp and hull are visible through the surface
-- Per-pixel analytic normals, Jacobian-based whitecaps, breaking shore wash, sun glitter, crest subsurface scattering
-- Raindrop impact rings and splash crowns that ride the swell
+Pure client-side — no installation, no backend. The build produces one
+self-contained HTML file you can host anywhere or open from disk.
 
-**Sky**
-- Physically-based Rayleigh/Mie scattering (adapted from the MIT-licensed [three.js `Sky` example](https://threejs.org/examples/#webgl_shaders_sky)) with full day/night cycle
-- Raymarched volumetric cumulus with sun-shadowed cores, silver linings and wind drift
-- Stars, milky way, moon, sun halo, cirrus veil
-- Lightning: forked ribbon bolts with cloud-interior flashes, driven by heavy rain
+* **Gerstner-wave ocean.** Fourteen wave components with deep-water
+  dispersion and travelling group envelopes, so swell arrives in sets that
+  build and dissolve. Per-pixel analytic normals, Jacobian-based whitecaps,
+  breaking shore wash, sun glitter, and crest subsurface scattering.
+* **Real reflections and refraction.** A mirrored scene render gives true
+  planar reflections; a second refraction pass lets you see the actual
+  seabed, kelp and hull through the rippling surface, attenuated by a
+  physically inspired water column.
+* **Physically based sky.** Rayleigh/Mie scattering with a full day/night
+  cycle, adapted from the MIT-licensed
+  [three.js `Sky` example](https://threejs.org/examples/#webgl_shaders_sky) —
+  plus stars, milky way, moon, sun halo and crepuscular rays at dusk.
+* **Volumetric clouds.** A raymarched cumulus slab with self-shadowed
+  bodies, silver linings, wind drift, and coverage from scattered fair-weather
+  puffs to a ragged storm deck.
+* **Weather.** Rain falls as velocity-aligned streaks, dimples the sea with
+  expanding impact rings and splash crowns, darkens the whole atmosphere, and
+  smears the horizon with distant rain curtains. Heavy rain builds forked
+  lightning strikes that flash the cloud deck from inside.
+* **Underwater world.** Orbit below the surface: a true Snell's-window view
+  of the sky through the waves, total internal reflection streaked with
+  caustics, a procedural sandy seabed with animated light webs, swaying kelp,
+  and depth-based light absorption.
+* **Procedural scene.** A three-masted galleon with a rigging web, billowed
+  sails and a lamplit stern gallery; a palm-cay island continuous from beach
+  to seabed; every prop generated in code.
+* **Adaptive quality.** A four-step quality ladder (resolution, render-target
+  sizes, simplified clouds) keeps the demo interactive on integrated GPUs.
 
-**Underwater**
-- Snell's-window surface seen from below, with clouds and sun glare refracted through the waves
-- Procedural sandy seabed with animated caustics, stone pavement, swaying kelp, depth-based light absorption
+## How to use it
 
-**Scene**
-- Procedural three-masted galleon (rigging web, billowed sails, lamplit stern gallery that flickers at night)
-- Sand cay island with curved-trunk palms and boulders, continuous from beach to seabed
-- Adaptive quality ladder so it stays interactive on integrated GPUs
+You have **two equally simple ways** to run Tideline — both with no
+installation, no account, and no server.
 
-## Running
+### Option 1 — Online
 
-The prebuilt **`Tideline-Standalone.html`** needs nothing — double-click it, works offline.
+> **[Open it in your browser — profrino.github.io/tideline](https://profrino.github.io/tideline/)**
 
-To hack on the source:
+Just open the link in Chrome, Edge, Firefox, or Safari. That's it.
 
-```bash
-npm install
-npm run build     # bundles src/ and regenerates Tideline-Standalone.html
-npm run dev       # watch mode; serve index.html with any static server
-```
+### Option 2 — Offline, on your own computer
 
-`src/tideline.js` holds the ocean/sky/underwater engine and all the shaders; `src/galleon.js` and `src/flora.js` build the props.
+Download **[Tideline-Standalone.html](https://github.com/ProfRino/tideline/releases/latest/download/Tideline-Standalone.html)**
+— one single file — from the
+[Releases page](https://github.com/ProfRino/tideline/releases). Save it
+anywhere, then **double-click it**. The demo opens straight in your default
+browser and works fully offline: no server, no install, nothing streamed.
+
+## For developers
+
+If you want to fork the code, audit it, or contribute changes:
+
+* **Clone and build:**
+  ```sh
+  git clone https://github.com/ProfRino/tideline.git
+  cd tideline
+  npm install
+  npm run build      # bundles src/ and regenerates Tideline-Standalone.html
+  npm run dev        # watch mode; serve index.html with any static server
+  ```
+* **Where things live:** `src/tideline.js` holds the ocean, sky and
+  underwater engine with all the shaders; `src/galleon.js` and
+  `src/flora.js` build the procedural props; `build-standalone.mjs` inlines
+  the bundle into the single-file build.
+* The GitHub Actions workflow at `.github/workflows/pages.yml` redeploys the
+  hosted demo on every push to `main`.
+
+## Stack
+
+[Three.js](https://threejs.org) + [esbuild](https://esbuild.github.io).
+That's the whole stack. MIT-licensed.
+
+## Citation
+
+If you reference this work, please cite:
+
+> Lovreglio, R. *Tideline*. Massey University.
+> https://github.com/ProfRino/tideline
+
+A machine-readable [`CITATION.cff`](CITATION.cff) is included in this
+repository — GitHub renders it as a "Cite this repository" button in the
+sidebar.
 
 ## License
 
-[MIT](LICENSE). All geometry and shading is procedural and original; the sky's scattering constants are adapted from the three.js `Sky` example (also MIT).
+[MIT](LICENSE) — © 2026 Rino Lovreglio. All geometry and shading is
+procedural and original; the sky's scattering constants are adapted from the
+three.js `Sky` example (also MIT).
