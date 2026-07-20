@@ -380,7 +380,7 @@ const skyFragment = /* glsl */ `
       float dt = (t1 - t0) / float(CLOUD_STEPS);
       // interleaved gradient noise: clean ordered dither, static so it never crawls
       float jitter = hash12(gl_FragCoord.xy * 1.37); // white noise: no ordered moire
-      float t = t0 + dt * jitter * 0.8;
+      float t = t0 + dt * jitter * 0.45;
 
       float transmittance = 1.0;
       vec3 scattered = vec3(0.0);
@@ -418,7 +418,7 @@ const skyFragment = /* glsl */ `
           // powder term keeps rims bright, cores shaded
           float powder = 1.0 - exp(-density * 3.5);
           float y01 = clamp((pos.y - CLOUD_BASE) / (CLOUD_TOP - CLOUD_BASE), 0.0, 1.0);
-          vec3 sampleLight = sunCol * sunLight * phase * powder + ambient * (0.35 + 0.65 * y01);
+          vec3 sampleLight = sunCol * sunLight * phase * mix(1.0, powder, 0.55) + ambient * (0.35 + 0.65 * y01);
           float stepOpacity = 1.0 - exp(-density * dt * 0.012);
           scattered += sampleLight * stepOpacity * transmittance;
           transmittance *= 1.0 - stepOpacity;
@@ -626,7 +626,8 @@ const waterFragment = /* glsl */ `
     float n0 = fbm(duv) + fbm(duv2) * 0.5;
     float nx = fbm(duv + vec2(e, 0.0)) + fbm(duv2 + vec2(e * 3.0, 0.0)) * 0.5;
     float ny = fbm(duv + vec2(0.0, e)) + fbm(duv2 + vec2(0.0, e * 3.0)) * 0.5;
-    normal.xz += vec2(n0 - nx, n0 - ny) * 3.2 * detailFade;
+    vec2 detailHF = vec2(n0 - nx, n0 - ny) * 3.2;
+    normal.xz += detailHF * detailFade;
     normal = normalize(normal);
 
     /* ---- raindrop impacts: expanding rings + splash crowns that ride
@@ -746,7 +747,8 @@ const waterFragment = /* glsl */ `
        Refract the eye ray through the rippled surface into the air
        and evaluate a live sky (gradient + clouds + sun glare); rays
        past the critical angle mirror the murky水 interior instead. */
-    vec3 airDir = refract(-viewDir, -normal, 1.33);
+    vec3 nUnder = normalize(normal + vec3(detailHF.x, 0.0, detailHF.y) * 0.6);
+    vec3 airDir = refract(-viewDir, -nUnder, 1.33);
     float tir = step(dot(airDir, airDir), 1e-6); // 1 = total internal reflection
     airDir = normalize(airDir + vec3(0.0, 1e-4, 0.0));
 
@@ -763,12 +765,13 @@ const waterFragment = /* glsl */ `
 
     /* total internal reflection: a green-glass mirror of the lit sea
        floor, streaked by the same caustic light webs */
-    float bounce = min(caustic(q * 0.35 + vec2(3.7, 1.3)), 1.6);
+float bounce = min(caustic(q * 0.35 + vec2(3.7, 1.3)), 1.6) * 0.6
+      + min(caustic(q * 1.4 + vec2(9.1, 5.2)), 1.6) * 0.55;
     vec3 tirCol = uUnderFog * (1.05 + 1.5 * bounce)
       + vec3(0.07, 0.24, 0.19) * bounce * max(uLightDir.y, 0.0) * 2.4;
     // silvery outlines trace the steep ripple flanks (grazing reflections)
-    float crest = smoothstep(0.14, 0.42, length(normal.xz));
-    tirCol += vec3(0.5, 0.68, 0.66) * crest * (0.25 + 0.55 * uDay);
+    float crest = smoothstep(0.24, 0.55, length(nUnder.xz));
+    tirCol += vec3(0.5, 0.68, 0.66) * crest * (0.16 + 0.38 * uDay);
 
     float edge = smoothstep(0.0, 0.3, airDir.y) * (1.0 - tir);
     color = mix(tirCol, skyCol, edge);
@@ -1120,7 +1123,7 @@ function init() {
   const skyMaterial = new THREE.ShaderMaterial({
     vertexShader: skyVertex, fragmentShader: skyFragment, uniforms: skyUniforms,
     side: THREE.BackSide, depthWrite: false,
-    defines: { FBM_OCT: 5, CLOUD_STEPS: 14, CLOUD_LSTEPS: 2 },
+    defines: { FBM_OCT: 5, CLOUD_STEPS: 20, CLOUD_LSTEPS: 2 },
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(9000, 48, 28), skyMaterial);
   scene.add(sky);
