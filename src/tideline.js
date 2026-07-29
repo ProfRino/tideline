@@ -479,10 +479,34 @@ const skyFragment = /* glsl */ `
     /* ---- residual sun glow that penetrates haze and thin cloud ---- */
     sky += uSunTint * pow(max(cosTheta, 0.0), 160.0) * 0.35 * uDay * (1.0 - uCloudCover * 0.7) * (1.0 - uRainSky * 0.85);
 
-    /* ---- submerged: the sky dome becomes murky backdrop water,
-       exactly matching the fog color at the horizon so the floor
-       fades into it without a seam ---- */
-    sky = mix(sky, uUnderFog * (1.0 + 0.55 * clamp(direction.y, 0.0, 1.0)), uUnderwater);
+    /* ---- submerged: the sky dome becomes the water column itself —
+       bright downwelling ceiling above, deep gloom below, a blurred
+       sun ball and god-ray spokes fanning down from the surface ---- */
+    if (uUnderwater > 0.002) {
+      float upness = clamp(direction.y, -1.0, 1.0);
+      vec3 uw = mix(uUnderFog, uUnderFog * vec3(0.30, 0.42, 0.55), smoothstep(0.0, -0.65, upness));
+      uw = mix(uw, uUnderFog * vec3(2.3, 2.15, 1.9) + vec3(0.010, 0.028, 0.034) * uDay,
+        smoothstep(0.02, 0.65, upness));
+      float cosSun = dot(direction, uSunDir);
+      // near the horizontal the dome must equal the flat under-fog exactly,
+      // or it shows as a bright seam through the far edge of the water plane
+      float horizonGate = smoothstep(0.015, 0.1, abs(upness));
+      // sun ball diffused by the water, plus wide forward scatter
+      uw += uSunTint * (pow(max(cosSun, 0.0), 34.0) * 3.2 + pow(max(cosSun, 0.0), 5.0) * 0.5)
+        * uDay * horizonGate;
+      if (cosSun > 0.15) {
+        // god rays: noise spokes around the sun axis, drifting slowly
+        vec3 gA = normalize(cross(uSunDir, up));
+        vec3 gB = normalize(cross(uSunDir, gA));
+        vec3 gRel = normalize(direction - uSunDir * cosSun);
+        float gPhi = atan(dot(gRel, gB), dot(gRel, gA));
+        float rays = vnoise(vec2(gPhi * 5.5 + uTime * 0.06, 1.7)) * 0.6
+                   + vnoise(vec2(gPhi * 12.0 - uTime * 0.045, 6.1)) * 0.4;
+        rays = smoothstep(0.44, 0.9, rays);
+        uw += uSunTint * rays * pow(max(cosSun, 0.0), 7.0) * 2.4 * uDay * horizonGate;
+      }
+      sky = mix(sky, uw, uUnderwater);
+    }
 
     // dither against banding
     sky += (hash12(gl_FragCoord.xy) - 0.5) * 0.004;
@@ -749,43 +773,66 @@ const waterFragment = /* glsl */ `
        Refract the eye ray through the rippled surface into the air
        and evaluate a live sky (gradient + clouds + sun glare); rays
        past the critical angle mirror the murky水 interior instead. */
-    float underDetail = uDetailAmp * 0.42 / (1.0 + dist * 0.012);
-    vec3 nUnder = normalize(normal + vec3(detailHF.x, 0.0, detailHF.y) * underDetail);
+    /* the underside normal field must read as flowing molten glass:
+       large, smooth, wind-stretched swirls (domain-warped low-octave
+       noise), not fractal speckle. A whisper of the fine churn is
+       blended back in close to the camera only. */
+    vec2 sq = vec2(dot(q, wdir), dot(q, wperp));
+    vec2 su = sq * vec2(0.27, 0.4) + vec2(uTime * 0.2, uTime * 0.03);
+    su += (vec2(vnoise(su * 1.6 + 3.1), vnoise(su * 1.6 + 9.7)) - 0.5) * 1.1;
+    float s0 = vnoise(su);
+    vec2 sg = vec2(s0 - vnoise(su + vec2(0.14, 0.0)), s0 - vnoise(su + vec2(0.0, 0.14))) * 6.5;
+    sg = wdir * sg.x + wperp * sg.y; // rotate the gradient back to world xz
+    float swirlAmp = 1.15 / (1.0 + dist * 0.045);
+    float underDetail = uDetailAmp * 0.3 / (1.0 + dist * 0.12);
+    vec3 nUnder = normalize(normal
+      + vec3(sg.x * swirlAmp + detailHF.x * underDetail, 0.0, sg.y * swirlAmp + detailHF.y * underDetail));
     vec3 airDir = refract(-viewDir, -nUnder, 1.33);
     float tir = step(dot(airDir, airDir), 1e-6); // 1 = total internal reflection
     airDir = normalize(airDir + vec3(0.0, 1e-4, 0.0));
 
     /* Snell's window: the sky seen through the surface stays close to
-       its TRUE brightness and hue — blue, with white clouds legible */
+       its TRUE brightness and hue — bright, milky, with clouds legible */
     float skyLift = clamp(airDir.y, 0.0, 1.0);
-    vec3 skyCol = mix(uFogColor * 1.9, uSkyZenith * 3.4, pow(skyLift, 0.6));
+    vec3 skyCol = mix(uFogColor * 2.2, uSkyZenith * 3.6, pow(skyLift, 0.6));
     vec2 cuv = airDir.xz / (airDir.y + 0.25);
     float cl = fbm(cuv * 0.7 + vec2(uTime * 0.012, uTime * 0.004));
     float cloudMask = smoothstep(mix(0.74, 0.32, uCloudCover2), mix(0.95, 0.62, uCloudCover2), cl);
-    skyCol = mix(skyCol, vec3(0.95, 0.97, 1.0) * (0.35 + 0.85 * uDay), cloudMask * 0.85);
+    skyCol = mix(skyCol, vec3(0.95, 0.97, 1.0) * (0.4 + 0.9 * uDay), cloudMask * 0.85);
+    // submerged: the refraction target holds the real world above the
+    // surface — ship, island, sky — wobbled hard by the ripples so the
+    // window churns the way real footage does
+    vec2 wUv = clamp(gl_FragCoord.xy / uScreenSize + nUnder.xz * 0.38, vec2(0.004), vec2(0.996));
+    skyCol = mix(skyCol, texture2D(uRefraction, wUv).rgb * 1.15, uSubmerged);
+    // grazing paths cross more churned surface — the window edge burns milky
+    skyCol *= 1.0 + 0.85 * pow(1.0 - skyLift, 2.0) * (0.3 + 0.7 * uDay);
     float sunGlare = pow(max(dot(airDir, uLightDir), 0.0), 60.0);
     skyCol += uLightColor * sunGlare * 8.0;
-    // submerged: the refraction target holds the real world above the
-    // surface — ship, island, sky — so the window shows actual scenery
-    vec2 wUv = clamp(gl_FragCoord.xy / uScreenSize + nUnder.xz * 0.24, vec2(0.004), vec2(0.996));
-    skyCol = mix(skyCol, texture2D(uRefraction, wUv).rgb * 1.08, uSubmerged);
 
-    /* total internal reflection: a green-glass mirror of the lit sea
-       floor, streaked by the same caustic light webs */
-float bounce = min(caustic(q * 0.35 + vec2(3.7, 1.3)), 1.6) * 0.6
-      + min(caustic(q * 1.4 + vec2(9.1, 5.2)), 1.6) * 0.55;
-    vec3 tirCol = uUnderFog * (1.05 + 1.5 * bounce)
-      + vec3(0.07, 0.24, 0.19) * bounce * max(uLightDir.y, 0.0) * 2.4;
-    // silvery outlines trace the steep ripple flanks (grazing reflections)
-    float crest = smoothstep(0.24, 0.55, length(nUnder.xz));
-    tirCol += vec3(0.5, 0.68, 0.66) * crest * (0.16 + 0.38 * uDay);
+    /* total internal reflection: past the critical angle the underside is
+       a true mirror of the underwater scene — deep water, seabed and
+       kelp reflected — with caustic webs playing across it */
+    float bounce = min(caustic(q * 0.35 + vec2(3.7, 1.3)), 1.6) * 0.5
+      + min(caustic(q * 1.4 + vec2(9.1, 5.2)), 1.6) * 0.45;
+    vec4 mCo = uMirrorMatrix * vec4(vWorldPosition, 1.0);
+    vec2 mUv2 = clamp(mCo.xy / max(mCo.w, 1e-4) + nUnder.xz * (0.4 / (1.0 + dist * 0.05)),
+      vec2(0.002), vec2(0.998));
+    vec3 sceneRefl = texture2D(uMirror, mUv2).rgb;
+    // procedural fallback for the rare back faces seen from above the water
+    vec3 tirProc = uUnderFog * (1.85 + 1.25 * bounce)
+      + vec3(0.055, 0.10, 0.115) * (0.25 + 0.75 * uDay);
+    vec3 tirCol = mix(tirProc, sceneRefl, uSubmerged);
+    tirCol += uUnderFog * bounce * (0.7 + 1.1 * max(uLightDir.y, 0.0));
+    // silvery sparkle on steep ripple flanks — near the camera only
+    float crest = smoothstep(0.2, 0.55, length(nUnder.xz)) * smoothstep(55.0, 12.0, dist);
+    tirCol += vec3(0.5, 0.68, 0.66) * crest * (0.2 + 0.5 * uDay);
 
     float edge = smoothstep(0.0, 0.3, airDir.y) * (1.0 - tir);
     color = mix(tirCol, skyCol, edge);
-    // silvery rim where rays graze the critical angle
-    float rim = pow(1.0 - abs(edge * 2.0 - 1.0), 3.0);
-    color += vec3(0.7, 0.82, 0.82) * rim * 0.4 * (0.25 + 0.75 * uDay);
-    float fogU = 1.0 - exp(-pow(dist * 0.03, 2.0));
+    // silvery rim where rays graze the critical angle — softens with range
+    float rim = pow(1.0 - abs(edge * 2.0 - 1.0), 3.0) * smoothstep(90.0, 18.0, dist);
+    color += vec3(0.75, 0.86, 0.87) * rim * 0.42 * (0.3 + 0.7 * uDay);
+    float fogU = 1.0 - exp(-pow(dist * 0.028, 2.0));
     color = mix(color, uUnderFog, clamp(fogU, 0.0, 1.0));
     }
 
@@ -970,7 +1017,8 @@ const COL = {
   scatterDay: new THREE.Color(0.05, 0.42, 0.45),
   deepStorm: new THREE.Color(0.022, 0.042, 0.05),
   shallowStorm: new THREE.Color(0.1, 0.16, 0.18),
-  underFogDay: new THREE.Color(0.03, 0.14, 0.17),
+  underFogDay: new THREE.Color(0.05, 0.205, 0.26),
+  shaftTint: new THREE.Color(0.45, 0.85, 0.9),
 };
 
 const scratch = { a: new THREE.Color(), b: new THREE.Color() };
@@ -1438,6 +1486,102 @@ function init() {
   bolt.visible = false;
   scene.add(bolt);
 
+  /* ---- underwater ambience: god-ray shafts, only visible while
+     diving. Cylindrically billboarded quads leaning along the
+     refracted sun ray; caustic bands sweep down them. ---- */
+  const SHAFT_COUNT = 18;
+  const shaftGeo = new THREE.InstancedBufferGeometry();
+  shaftGeo.setAttribute("position", new THREE.Float32BufferAttribute(
+    [-0.5, 0, 0, 0.5, 0, 0, -0.5, 1, 0, 0.5, 1, 0], 3));
+  shaftGeo.setIndex([0, 1, 2, 2, 1, 3]);
+  {
+    const data = new Float32Array(SHAFT_COUNT * 4);
+    for (let i = 0; i < SHAFT_COUNT; i++) {
+      data[i * 4] = (Math.random() - 0.5) * 44;
+      data[i * 4 + 1] = (Math.random() - 0.5) * 44;
+      data[i * 4 + 2] = 1.1 + Math.random() * 2.4; // width
+      data[i * 4 + 3] = Math.random();             // seed
+    }
+    shaftGeo.setAttribute("aShaft", new THREE.InstancedBufferAttribute(data, 4));
+    shaftGeo.instanceCount = SHAFT_COUNT;
+  }
+  const shaftUniforms = {
+    uTime: { value: 0 },
+    uShaftAmt: { value: 0 },
+    uShaftTilt: { value: new THREE.Vector2() },
+    uShaftColor: { value: new THREE.Color(0.4, 0.75, 0.8) },
+  };
+  const shaftMaterial = new THREE.ShaderMaterial({
+    uniforms: shaftUniforms,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      attribute vec4 aShaft; // x, z, width, seed
+      uniform vec2 uShaftTilt;
+      varying vec2 vQuad;
+      varying float vSeed;
+      varying float vDist;
+      void main() {
+        const float BOX = 44.0;
+        const float TOP = -0.22;
+        const float BOT = -7.4;
+        vec2 rel = mod(aShaft.xy - cameraPosition.xz + BOX * 0.5, BOX) - BOX * 0.5;
+        vec2 base = cameraPosition.xz + rel;
+        float y = mix(BOT, TOP, position.y);
+        vec2 center = base + uShaftTilt * (TOP - y); // lean with the refracted sun
+        vec3 toCam = vec3(cameraPosition.x - center.x, 0.0, cameraPosition.z - center.y);
+        vDist = length(toCam);
+        vec3 side = normalize(cross(vec3(0.0, 1.0, 0.0), toCam / max(vDist, 1e-3)));
+        vec3 world = vec3(center.x, y, center.y) + side * (position.x * aShaft.z);
+        vQuad = vec2(position.x * 2.0, position.y);
+        vSeed = aShaft.w;
+        gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uShaftAmt;
+      uniform float uTime;
+      uniform vec3 uShaftColor;
+      varying vec2 vQuad;
+      varying float vSeed;
+      varying float vDist;
+      float hash12(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+      }
+      float vnoise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash12(i), hash12(i + vec2(1.0, 0.0)), f.x),
+          mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), f.x), f.y);
+      }
+      void main() {
+        float across = 1.0 - vQuad.x * vQuad.x;
+        across *= across;
+        // caustic bands sweep down the shaft as the surface refocuses light
+        float bands = vnoise(vec2(vSeed * 61.0 + vQuad.x * 2.3 + uTime * 0.4, vQuad.y * 5.0 - uTime * 0.7));
+        bands = 0.35 + 0.65 * smoothstep(0.3, 0.8, bands);
+        // fade out BEFORE the quad's top edge — a hard cutoff there reads
+        // as a sharp diagonal seam against the bright surface
+        float vert = pow(clamp(vQuad.y, 0.0, 1.0), 1.6) * (1.0 - smoothstep(0.72, 0.98, vQuad.y));
+        float distFade = smoothstep(2.0, 5.0, vDist) * smoothstep(26.0, 10.0, vDist);
+        float a = across * vert * bands * distFade * uShaftAmt * 0.55;
+        if (a < 0.004) discard;
+        gl_FragColor = vec4(uShaftColor, a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  const shafts = new THREE.Mesh(shaftGeo, shaftMaterial);
+  shafts.frustumCulled = false;
+  shafts.visible = false;
+  scene.add(shafts);
+
   const boltForward = new THREE.Vector3();
   let boltFade = 1;
   function regenBolt() {
@@ -1530,6 +1674,7 @@ function init() {
   const ORIGIN = new THREE.Vector3(0, 0, 0);
   const mirrorPlane = new THREE.Plane();
   const planeNormal = new THREE.Vector3(0, 1, 0);
+  const planeNormalDown = new THREE.Vector3(0, -1, 0);
   const view = new THREE.Vector3();
   const target = new THREE.Vector3();
   const lookAt = new THREE.Vector3();
@@ -1601,11 +1746,85 @@ function init() {
     waterFar.visible = true;
   }
 
+  /* ---- under-mirror pass: while submerged, render the underwater
+     scene reflected across the surface plane, so total internal
+     reflection shows the real seabed / deep water / kelp mirrored ---- */
+  function renderMirrorUnder() {
+    view.copy(camera.position);
+    if (view.y >= -0.02) return; // too close to the plane: reflection invisible
+    view.y = -view.y; // virtual camera above the plane, looking down
+
+    rotationMatrix.extractRotation(camera.matrixWorld);
+    lookAt.set(0, 0, -1).applyMatrix4(rotationMatrix).add(camera.position);
+    target.copy(lookAt);
+    target.y *= -1;
+
+    mirrorCamera.position.copy(view);
+    mirrorCamera.up.set(0, 1, 0).applyMatrix4(rotationMatrix);
+    mirrorCamera.up.reflect(planeNormal);
+    mirrorCamera.lookAt(target);
+    mirrorCamera.far = camera.far;
+    mirrorCamera.updateMatrixWorld();
+    mirrorCamera.projectionMatrix.copy(camera.projectionMatrix);
+
+    mirrorMatrix.set(
+      0.5, 0, 0, 0.5,
+      0, 0.5, 0, 0.5,
+      0, 0, 0.5, 0.5,
+      0, 0, 0, 1
+    );
+    mirrorMatrix.multiply(mirrorCamera.projectionMatrix);
+    mirrorMatrix.multiply(mirrorCamera.matrixWorldInverse);
+
+    // oblique near-plane clipping: only what lies BELOW the surface reflects
+    mirrorPlane.setFromNormalAndCoplanarPoint(planeNormalDown, ORIGIN);
+    mirrorPlane.applyMatrix4(mirrorCamera.matrixWorldInverse);
+    clipPlane.set(mirrorPlane.normal.x, mirrorPlane.normal.y, mirrorPlane.normal.z, mirrorPlane.constant);
+    const projectionMatrix = mirrorCamera.projectionMatrix;
+    q.x = (Math.sign(clipPlane.x) + projectionMatrix.elements[8]) / projectionMatrix.elements[0];
+    q.y = (Math.sign(clipPlane.y) + projectionMatrix.elements[9]) / projectionMatrix.elements[5];
+    q.z = -1.0;
+    q.w = (1.0 + projectionMatrix.elements[10]) / projectionMatrix.elements[14];
+    clipPlane.multiplyScalar(2.0 / clipPlane.dot(q));
+    projectionMatrix.elements[2] = clipPlane.x;
+    projectionMatrix.elements[6] = clipPlane.y;
+    projectionMatrix.elements[10] = clipPlane.z + 1.0 - 0.003;
+    projectionMatrix.elements[14] = clipPlane.w;
+
+    waterNear.visible = false;
+    waterFar.visible = false;
+    const rainWasVisible = rain.visible;
+    const boltWasVisible = bolt.visible;
+    const shaftsWere = shafts.visible;
+    shafts.visible = false; // camera-relative billboards break in the mirror view
+    rain.visible = false;
+    bolt.visible = false;
+    sky.material = skyMirrorMaterial; // its underwater branch paints the murk backdrop
+    const oldToneMapping = renderer.toneMapping;
+    const oldShadowAuto = renderer.shadowMap.autoUpdate;
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.setRenderTarget(mirrorRT);
+    renderer.clear();
+    renderer.render(scene, mirrorCamera);
+    renderer.setRenderTarget(null);
+    renderer.toneMapping = oldToneMapping;
+    renderer.shadowMap.autoUpdate = oldShadowAuto;
+    sky.material = mainSkyMaterial;
+    rain.visible = rainWasVisible;
+    bolt.visible = boltWasVisible;
+    shafts.visible = shaftsWere;
+    waterNear.visible = true;
+    waterFar.visible = true;
+  }
+
   /* ---- skyward pass: while submerged, capture the world ABOVE the
      surface into the refraction target so Snell's window shows it ---- */
   function renderSkyward() {
     waterNear.visible = false;
     waterFar.visible = false;
+    const shaftsWere = shafts.visible;
+    shafts.visible = false; // shafts must not leak into the capture of the world above
     const oldToneMapping = renderer.toneMapping;
     const oldShadowAuto = renderer.shadowMap.autoUpdate;
     const oldUnderwater = skyUniforms.uUnderwater.value;
@@ -1619,6 +1838,7 @@ function init() {
     renderer.toneMapping = oldToneMapping;
     renderer.shadowMap.autoUpdate = oldShadowAuto;
     skyUniforms.uUnderwater.value = oldUnderwater;
+    shafts.visible = shaftsWere;
     waterNear.visible = true;
     waterFar.visible = true;
   }
@@ -1766,8 +1986,11 @@ function init() {
     const camSurface = sampleWave(camera.position.x, camera.position.z, elapsed);
     const submerged = camera.position.y < camSurface - 0.04;
     subMix = THREE.MathUtils.lerp(subMix, submerged ? 1 : 0, 0.25);
+    // the water column dims as the camera sinks — less light reaches down
+    const camDepth = Math.max(0, camSurface - camera.position.y);
     underFog.copy(COL.underFogDay)
-      .multiplyScalar((0.1 + 0.9 * atmo.day) * (1 - atmo.overcast * 0.45));
+      .multiplyScalar((0.1 + 0.9 * atmo.day) * (1 - atmo.overcast * 0.45)
+        * (0.55 + 0.45 * Math.exp(-camDepth * 0.07)));
     skyUniforms.uUnderwater.value = subMix;
     skyUniforms.uUnderFog.value.copy(underFog);
     waterUniforms.uUnderFog.value.copy(underFog);
@@ -1802,6 +2025,23 @@ function init() {
     directional.intensity *= 1 - smooth.rain * 0.45;
     hemi.intensity *= 1 - smooth.rain * 0.35;
 
+    /* ---- underwater ambience: god-ray shafts ---- */
+    const shaftStrength = subMix * atmo.day * (1 - atmo.overcast * 0.9)
+      * THREE.MathUtils.clamp(sun.y * 3.2, 0, 1) * (1 - smooth.rain * 0.6);
+    shafts.visible = shaftStrength > 0.015;
+    shaftUniforms.uTime.value = elapsed % 3600;
+    shaftUniforms.uShaftAmt.value = shaftStrength;
+    // refract the sun ray at the surface so the shafts lean the right way
+    {
+      const eta = 1 / 1.33;
+      const cosI = Math.max(sun.y, 0.05);
+      const kRefr = Math.max(1 - eta * eta * (1 - cosI * cosI), 1e-3);
+      shaftUniforms.uShaftTilt.value.set(
+        (-sun.x * eta) / Math.sqrt(kRefr),
+        (-sun.z * eta) / Math.sqrt(kRefr));
+    }
+    shaftUniforms.uShaftColor.value.copy(atmo.sunTint).lerp(COL.shaftTint, 0.45);
+
     /* ---- lightning: heavy rain builds strikes on a random cadence ---- */
     nextStrike -= dtSec;
     if (smooth.rain > 0.68 && nextStrike <= 0) {
@@ -1835,6 +2075,7 @@ function init() {
       renderRefraction();
     } else {
       renderSkyward();
+      renderMirrorUnder();
     }
     renderer.render(scene, camera);
 
@@ -1902,7 +2143,7 @@ function init() {
       // (a visible tab clears the drawing buffer after each composite)
       const elapsed = (performance.now() - startedAt) / 1000;
       const sub = camera.position.y < sampleWave(camera.position.x, camera.position.z, elapsed) - 0.04;
-      if (!sub) { renderMirror(); renderRefraction(); } else { renderSkyward(); }
+      if (!sub) { renderMirror(); renderRefraction(); } else { renderSkyward(); renderMirrorUnder(); }
       renderer.render(scene, camera);
       return renderer.domElement.toDataURL("image/jpeg", quality);
     },
